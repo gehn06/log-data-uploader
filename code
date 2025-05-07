@@ -1,0 +1,78 @@
+import mysql.connector
+
+# File paths
+header_path = r"C:\log\header.txt"
+data_path = r"C:\log\data.txt"
+
+# MySQL Connection Details
+db_config = {
+    'host': 'localhost',
+    'user': 'root',
+    'password': 'mynameiskhan#123',
+    'database': 'test_db'
+}
+
+# Data type mapping based on column names
+def map_column_type(col_name):
+    col_name_lower = col_name.lower()
+    if 'status' in col_name_lower:
+        return 'INT'
+    elif 'size' in col_name_lower or 'bytes' in col_name_lower:
+        return 'INT'
+    elif 'time' in col_name_lower and 'taken' in col_name_lower:
+        return 'FLOAT'
+    elif 'ip' in col_name_lower:
+        return 'VARCHAR(45)'
+    elif 'date' in col_name_lower or 'time' in col_name_lower or 'timestamp' in col_name_lower:
+        return 'VARCHAR(40)'  # Use DATETIME if parsing
+    elif 'url' in col_name_lower or 'referer' in col_name_lower:
+        return 'TEXT'
+    elif 'agent' in col_name_lower:
+        return 'TEXT'
+    else:
+        return 'TEXT'  # Default fallback
+
+# Read and clean headers
+with open(header_path, 'r') as header_file:
+    columns = header_file.readline().strip().split('|')
+
+cleaned_columns = [col.replace('$', '').replace('[', '').replace(']', '').replace('"', '').strip() for col in columns]
+
+# Read and clean data rows
+data_rows = []
+with open(data_path, 'r') as data_file:
+    for line in data_file:
+        parts = line.strip().split('|')
+        if len(parts) == len(cleaned_columns):
+            data_rows.append(parts)
+
+# Single table name
+table_name = "log_table_all"
+
+try:
+    conn = mysql.connector.connect(**db_config)
+    cursor = conn.cursor()
+
+    # Create table if not exists
+    cursor.execute(f"SHOW TABLES LIKE '{table_name}'")
+    if not cursor.fetchone():
+        create_query = f"CREATE TABLE `{table_name}` (" + ",".join([
+            f"`{col}` {map_column_type(col)}" for col in cleaned_columns
+        ]) + ")"
+        cursor.execute(create_query)
+
+    # Insert data
+    insert_query = f"INSERT INTO `{table_name}` ({', '.join([f'`{col}`' for col in cleaned_columns])}) VALUES ({', '.join(['%s'] * len(cleaned_columns))})"
+    for row in data_rows:
+        cursor.execute(insert_query, row)
+
+    conn.commit()
+    print("Data inserted successfully into one unified table!")
+
+except mysql.connector.Error as err:
+    print(f"Error: {err}")
+
+finally:
+    if conn.is_connected():
+        cursor.close()
+        conn.close()
