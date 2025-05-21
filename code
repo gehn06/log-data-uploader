@@ -12,7 +12,7 @@ db_config = {
     'database': 'test_db'
 }
 
-# Data type mapping based on column names
+# Data type mapping
 def map_column_type(col_name):
     col_name_lower = col_name.lower()
     if 'status' in col_name_lower:
@@ -24,13 +24,13 @@ def map_column_type(col_name):
     elif 'ip' in col_name_lower:
         return 'VARCHAR(45)'
     elif 'date' in col_name_lower or 'time' in col_name_lower or 'timestamp' in col_name_lower:
-        return 'VARCHAR(40)'  # Use DATETIME if parsing
+        return 'VARCHAR(40)'
     elif 'url' in col_name_lower or 'referer' in col_name_lower:
         return 'TEXT'
     elif 'agent' in col_name_lower:
         return 'TEXT'
     else:
-        return 'TEXT'  # Default fallback
+        return 'TEXT'
 
 # Read and clean headers
 with open(header_path, 'r') as header_file:
@@ -44,30 +44,42 @@ with open(data_path, 'r') as data_file:
     for line in data_file:
         parts = line.strip().split('|')
         if len(parts) == len(cleaned_columns):
-            data_rows.append(parts)
+            row = dict(zip(cleaned_columns, parts))
 
-# Single table name
-table_name = "log_table_all"
+            # --- SQL Changes 4: Split `request` ---
+            request_parts = row.get("request", "").split()
+            row["request_method"] = request_parts[0] if len(request_parts) > 0 else ""
+            row["request_path"] = request_parts[1] if len(request_parts) > 1 else ""
+            row["protocol"] = request_parts[2] if len(request_parts) > 2 else ""
+
+            # --- SQL Changes 5: Combine referer and path ---
+            row["referer_path"] = row.get("http_referer", "") + row.get("request_path", "")
+
+            data_rows.append(row)
+
+# Final column list for new enhanced table
+final_columns = cleaned_columns + ['request_method', 'request_path', 'protocol', 'referer_path']
+table_name = "log_table_enhanced"
 
 try:
     conn = mysql.connector.connect(**db_config)
     cursor = conn.cursor()
 
-    # Create table if not exists
+    # Create enhanced table if not exists
     cursor.execute(f"SHOW TABLES LIKE '{table_name}'")
     if not cursor.fetchone():
         create_query = f"CREATE TABLE `{table_name}` (" + ",".join([
-            f"`{col}` {map_column_type(col)}" for col in cleaned_columns
+            f"`{col}` {map_column_type(col)}" for col in final_columns
         ]) + ")"
         cursor.execute(create_query)
 
-    # Insert data
-    insert_query = f"INSERT INTO `{table_name}` ({', '.join([f'`{col}`' for col in cleaned_columns])}) VALUES ({', '.join(['%s'] * len(cleaned_columns))})"
+    # Insert data into enhanced table
+    insert_query = f"INSERT INTO `{table_name}` ({', '.join([f'`{col}`' for col in final_columns])}) VALUES ({', '.join(['%s'] * len(final_columns))})"
     for row in data_rows:
-        cursor.execute(insert_query, row)
+        cursor.execute(insert_query, [row[col] for col in final_columns])
 
     conn.commit()
-    print("Data inserted successfully into one unified table!")
+    print("Enhanced data inserted successfully into 'log_table_enhanced'!")
 
 except mysql.connector.Error as err:
     print(f"Error: {err}")
